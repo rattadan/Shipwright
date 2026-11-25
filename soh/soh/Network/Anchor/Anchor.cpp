@@ -182,6 +182,55 @@ void Anchor::ProcessIncomingPacketQueue() {
 
 // MARK: - Misc/Helpers
 
+uint32_t Anchor::GetActorSyncBroadcasterClientId(s8 roomNum) {
+    if (!IsSaveLoaded()) {
+        return 0;
+    }
+
+    // How long a client must have been in a room before it can take over broadcasting,
+    // so a fresh entrant doesn't snap everyone's actors back to spawn positions
+    static const u32 BROADCASTER_WARMUP_FRAMES = 60;
+
+    u32 now = gPlayState->gameplayFrames;
+    uint32_t best = UINT32_MAX;
+
+    auto ClientInRoom = [&](AnchorClient& client) {
+        // roomNum < 0 (actors that persist across rooms) is treated as scene-wide authority
+        if (client.self) {
+            return roomNum < 0 || (IsSaveLoaded() && gPlayState->roomCtx.curRoom.num == roomNum);
+        }
+        return client.online && client.isSaveLoaded && client.sceneNum == gPlayState->sceneNum &&
+               (roomNum < 0 || client.curRoomNum == roomNum);
+    };
+
+    // Prefer clients that have been in the room for a while (their actor state has history)
+    for (auto& [clientId, client] : clients) {
+        if (clientId < best && ClientInRoom(client)) {
+            u32 enteredFrame = client.self ? myRoomEnteredFrame : client.roomEnteredFrame;
+            if ((now - enteredFrame) >= BROADCASTER_WARMUP_FRAMES) {
+                best = clientId;
+            }
+        }
+    }
+
+    if (best != UINT32_MAX) {
+        return best;
+    }
+
+    // Nobody is warm yet: fall back to the lowest clientId in the room
+    for (auto& [clientId, client] : clients) {
+        if (clientId < best && ClientInRoom(client)) {
+            best = clientId;
+        }
+    }
+
+    return best == UINT32_MAX ? 0 : best;
+}
+
+bool Anchor::IsActorSyncBroadcaster(s8 roomNum) {
+    return GetActorSyncBroadcasterClientId(roomNum) == ownClientId;
+}
+
 // Kills all existing anchor actors and respawns them with the new client data
 
 struct DummyPlayerClientId {

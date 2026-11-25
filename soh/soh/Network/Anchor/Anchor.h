@@ -33,6 +33,7 @@ typedef struct {
     s16 sceneNum;
     s8 curRoomNum;
     s32 entranceIndex;
+    u32 roomEnteredFrame = 0; // gameplayFrames when this client's curRoomNum was last seen changing
 
     // Only available in PLAYER_UPDATE packets
     s32 linkAge;
@@ -96,6 +97,9 @@ class Anchor : public Network {
     bool isHandlingUpdateTeamState = false;
     bool isProcessingIncomingPacket = false;
     bool isSpawningRemoteActor = false;
+    bool isApplyingRemoteDespawn = false;
+    s8 lastKnownRoomNum = -1;
+    u32 myRoomEnteredFrame = 0; // gameplayFrames when we last entered our current room
     std::queue<nlohmann::json> incomingPacketQueue;
     std::mutex incomingPacketQueueMutex;
     std::queue<nlohmann::json> outgoingPacketQueue;
@@ -162,6 +166,14 @@ class Anchor : public Network {
 
     static Anchor* Instance;
     static const AnchorSyncedActorConfig* GetSyncedActorConfig(s16 actorId);
+    /**
+     * Returns the clientId that should simulate and broadcast synced actor state for the
+     * given room: the lowest clientId among clients that have been in the room for a bit
+     * (so a fresh entrant doesn't clobber everyone with just-spawned positions), falling
+     * back to the lowest clientId in the room if nobody qualifies.
+     */
+    uint32_t GetActorSyncBroadcasterClientId(s8 roomNum);
+    bool IsActorSyncBroadcaster(s8 roomNum);
     std::map<uint32_t, AnchorClient> clients;
     RoomState roomState;
 

@@ -140,13 +140,12 @@ void Anchor::HandlePacket_ActorState(nlohmann::json payload) {
         Actor* actor = FindSyncedActor(actorId, params, spawnPos);
 
         if (actor != nullptr) {
-            // Stamp before killing so our own OnActorKill hook doesn't echo the despawn back
-            AnchorActorSyncData* sync =
-                ObjectExtension::GetInstance().Get<AnchorActorSyncData>(actor);
-            if (sync != nullptr) {
-                sync->remoteUpdateFrame = gPlayState->gameplayFrames;
-            }
+            // Mark so our own OnActorKill hook doesn't echo the despawn back. A frame
+            // stamp can't be used here since the position heartbeat keeps it fresh,
+            // which would also suppress legitimate local kills
+            isApplyingRemoteDespawn = true;
             Actor_Kill(actor);
+            isApplyingRemoteDespawn = false;
         }
         return;
     }
@@ -171,6 +170,12 @@ void Anchor::HandlePacket_ActorState(nlohmann::json payload) {
     }
 
     if (actor == nullptr) {
+        return;
+    }
+
+    // For enemies only the room broadcaster's simulation is applied. If that's us,
+    // ignore remote positions so their stream doesn't fight our simulation
+    if (actor->category == ACTORCAT_ENEMY && IsActorSyncBroadcaster(actor->room)) {
         return;
     }
 

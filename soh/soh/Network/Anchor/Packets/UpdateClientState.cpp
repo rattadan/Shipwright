@@ -69,6 +69,9 @@ void Anchor::HandlePacket_UpdateClientState(nlohmann::json payload) {
         clients[clientId].seed = client.seed;
         clients[clientId].isSaveLoaded = client.isSaveLoaded;
         clients[clientId].isGameComplete = client.isGameComplete;
+        if (clients[clientId].sceneNum != client.sceneNum || clients[clientId].curRoomNum != client.curRoomNum) {
+            clients[clientId].roomEnteredFrame = gPlayState != nullptr ? gPlayState->gameplayFrames : 0;
+        }
         clients[clientId].sceneNum = client.sceneNum;
         clients[clientId].curRoomNum = client.curRoomNum;
         clients[clientId].entranceIndex = client.entranceIndex;

@@ -101,7 +101,13 @@ void Anchor::RegisterHooks() {
         SendPacket_PlayerUpdate();
     });
 
-    COND_HOOK(OnGameFrameUpdate, isConnected, [&]() { ProcessIncomingPacketQueue(); });
+    COND_HOOK(OnGameFrameUpdate, isConnected, [&]() {
+        if (IsSaveLoaded() && gPlayState->roomCtx.curRoom.num != lastKnownRoomNum) {
+            lastKnownRoomNum = gPlayState->roomCtx.curRoom.num;
+            myRoomEnteredFrame = gPlayState->gameplayFrames;
+        }
+        ProcessIncomingPacketQueue();
+    });
 
     COND_HOOK(OnPlayerSfx, isConnected, [&](u16 sfxId) { SendPacket_PlayerSfx(sfxId); });
     COND_HOOK(OnOcarinaNote, isConnected,
@@ -418,7 +424,9 @@ void Anchor::RegisterHooks() {
 
     // Runtime-state sync for actors that keep state outside of flags. The position at init
     // time is stored since home.pos mutates as actors like push blocks are moved. Enemies are
-    // registered as well so their despawns can be replicated.
+    // registered as well so their despawns can be replicated. Enemies also keep updating
+    // regardless of distance so the room broadcaster's simulation (and its position
+    // stream) doesn't pause while it is far from the local player.
     COND_HOOK(OnActorInit, isConnected, [&](void* actorRef) {
         Actor* actor = (Actor*)actorRef;
 
@@ -426,19 +434,39 @@ void Anchor::RegisterHooks() {
             ObjectExtension::GetInstance().Set<AnchorActorSyncData>(
                 actor, AnchorActorSyncData{ actor->home.pos, actor->home.pos, actor->home.rot, 0 });
         }
+
+        if (actor->category == ACTORCAT_ENEMY) {
+            actor->flags |= ACTOR_FLAG_UPDATE_CULLING_DISABLED;
+        }
     });
 
     COND_HOOK(OnActorUpdate, isConnected, [&](void* actorRef) {
         Actor* actor = (Actor*)actorRef;
         const AnchorSyncedActorConfig* config = Anchor::GetSyncedActorConfig(actor->id);
+        bool isEnemy = actor->category == ACTORCAT_ENEMY;
 
-        if (config == nullptr || !config->broadcastPos) {
+        if ((config == nullptr || !config->broadcastPos) && !isEnemy) {
             return;
         }
 
         AnchorActorSyncData* sync = ObjectExtension::GetInstance().Get<AnchorActorSyncData>(actor);
 
         if (sync == nullptr) {
+            return;
+        }
+
+        // Enemy authority: only the room's broadcaster simulates positions for real and
+        // streams them. Other clients keep their local update running (so animations,
+        // colliders and interactions with the local player stay alive) but pin pos/rot
+        // to the stream so the local simulation can't displace the actor. If the stream
+        // goes stale (broadcaster left or its sim is paused) the local sim takes over,
+        // which also makes handoff seamless when this client becomes the broadcaster
+        if (isEnemy && !Anchor::Instance->IsActorSyncBroadcaster(actor->room)) {
+            if ((gPlayState->gameplayFrames - sync->remoteUpdateFrame) < 90) {
+                actor->world.pos = sync->lastBroadcastPos;
+                actor->world.rot = sync->lastBroadcastRot;
+                actor->shape.rot = sync->lastBroadcastRot;
+            }
             return;
         }
 
@@ -453,9 +481,10 @@ void Anchor::RegisterHooks() {
             }
             sync->lastBroadcastPos = actor->world.pos;
             sync->lastBroadcastRot = actor->world.rot;
-        } else if (!remoteOwned && gPlayState->gameplayFrames % 60 == 0 &&
-                   Math_Vec3f_DistXYZ(&actor->world.pos, &sync->spawnPos) > 0.01f) {
-            // Periodic re-broadcast so clients that reload the room converge back
+        } else if (!remoteOwned && gPlayState->gameplayFrames % (isEnemy ? 30 : 60) == 0 &&
+                   (isEnemy || Math_Vec3f_DistXYZ(&actor->world.pos, &sync->spawnPos) > 0.01f)) {
+            // Periodic re-broadcast: keeps receivers' enemies pinned even while idle, and
+            // lets clients that reload the room converge back
             Anchor::Instance->SendPacket_ActorState(actor, sync->spawnPos);
         }
     });
@@ -488,7 +517,7 @@ void Anchor::RegisterHooks() {
         }
 
         // Don't echo back despawns that were applied by a remote ACTOR_STATE packet
-        if ((gPlayState->gameplayFrames - sync->remoteUpdateFrame) < 30) {
+        if (isApplyingRemoteDespawn) {
             return;
         }
 
