@@ -15,7 +15,13 @@ The Ship does not include any of the original game's copyright assets.  You are 
 ### 1. Verify your ROM dump
 You can verify you have dumped a supported copy of the game by using the compatibility checker at https://ship.equipment/. If you'd prefer to manually validate your ROM dump, you can cross-reference its `sha1` hash with the hashes [here](docs/supportedHashes.json).
 
-### 2. Download The Ship of Harkinian from [Releases](https://github.com/HarbourMasters/Shipwright/releases)
+### 2. Download The Ship of Harkinian from [Releases](https://github.com/rattadan/Shipwright/releases)
+
+Pick the **latest** build there and grab the file for your platform:
+
+* Windows: `soh-windows.zip`
+* Linux: `soh-linux-x86_64.appimage` (or `soh-linux-aarch64.appimage` for ARM64)
+* macOS: `SoH-mac.dmg`
 
 ### 3. Launch the Game!
 #### Windows
