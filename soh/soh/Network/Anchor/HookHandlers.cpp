@@ -1,6 +1,7 @@
 #include "Anchor.h"
 #include "soh/Enhancements/cosmetics/cosmeticsTypes.h"
 #include "soh/Enhancements/game-interactor/GameInteractor.h"
+#include "soh/ObjectExtension/ObjectExtension.h"
 #include "soh/frame_interpolation.h"
 
 extern "C" {
@@ -52,6 +53,8 @@ void EnDoor_Idle(EnDoor* enDoor, PlayState* play);
 float OTRGetDimensionFromLeftEdge(float v);
 float OTRGetDimensionFromRightEdge(float v);
 }
+
+static ObjectExtension::Register<AnchorActorSyncData> AnchorActorSyncDataRegister;
 
 void Anchor::RegisterHooks() {
 
@@ -411,6 +414,85 @@ void Anchor::RegisterHooks() {
         if (Flags_GetSwitch(gPlayState, (actor->dyna.actor.params >> 8) & 0x3F)) {
             *should = true;
         }
+    });
+
+    // Runtime-state sync for actors that keep state outside of flags. The position at init
+    // time is stored since home.pos mutates as actors like push blocks are moved. Enemies are
+    // registered as well so their despawns can be replicated.
+    COND_HOOK(OnActorInit, isConnected, [&](void* actorRef) {
+        Actor* actor = (Actor*)actorRef;
+
+        if (Anchor::GetSyncedActorConfig(actor->id) != nullptr || actor->category == ACTORCAT_ENEMY) {
+            ObjectExtension::GetInstance().Set<AnchorActorSyncData>(
+                actor, AnchorActorSyncData{ actor->home.pos, actor->home.pos, actor->home.rot, 0 });
+        }
+    });
+
+    COND_HOOK(OnActorUpdate, isConnected, [&](void* actorRef) {
+        Actor* actor = (Actor*)actorRef;
+        const AnchorSyncedActorConfig* config = Anchor::GetSyncedActorConfig(actor->id);
+
+        if (config == nullptr || !config->broadcastPos) {
+            return;
+        }
+
+        AnchorActorSyncData* sync = ObjectExtension::GetInstance().Get<AnchorActorSyncData>(actor);
+
+        if (sync == nullptr) {
+            return;
+        }
+
+        // Don't echo back positions that were applied by a remote ACTOR_STATE packet
+        bool remoteOwned = (gPlayState->gameplayFrames - sync->remoteUpdateFrame) < 30;
+
+        if (Math_Vec3f_DistXYZ(&actor->world.pos, &sync->lastBroadcastPos) > 0.01f ||
+            actor->world.rot.x != sync->lastBroadcastRot.x || actor->world.rot.y != sync->lastBroadcastRot.y ||
+            actor->world.rot.z != sync->lastBroadcastRot.z) {
+            if (!remoteOwned) {
+                Anchor::Instance->SendPacket_ActorState(actor, sync->spawnPos);
+            }
+            sync->lastBroadcastPos = actor->world.pos;
+            sync->lastBroadcastRot = actor->world.rot;
+        } else if (!remoteOwned && gPlayState->gameplayFrames % 60 == 0 &&
+                   Math_Vec3f_DistXYZ(&actor->world.pos, &sync->spawnPos) > 0.01f) {
+            // Periodic re-broadcast so clients that reload the room converge back
+            Anchor::Instance->SendPacket_ActorState(actor, sync->spawnPos);
+        }
+    });
+
+    // Runtime-spawned synced actors (item drops, spawned blocks, ...) are broadcast so
+    // remote clients can spawn them too
+    COND_HOOK(OnActorSpawn, isConnected, [&](void* actorRef) {
+        Actor* actor = (Actor*)actorRef;
+        const AnchorSyncedActorConfig* config = Anchor::GetSyncedActorConfig(actor->id);
+
+        if (isSpawningRemoteActor || config == nullptr || !config->broadcastSpawn) {
+            return;
+        }
+
+        AnchorActorSyncData* sync = ObjectExtension::GetInstance().Get<AnchorActorSyncData>(actor);
+        Anchor::Instance->SendPacket_ActorState(actor, sync != nullptr ? sync->spawnPos : actor->home.pos);
+    });
+
+    COND_HOOK(OnActorKill, isConnected, [&](void* actorRef) {
+        Actor* actor = (Actor*)actorRef;
+        AnchorActorSyncData* sync = ObjectExtension::GetInstance().Get<AnchorActorSyncData>(actor);
+
+        if (sync == nullptr) {
+            return;
+        }
+
+        // Kills of actors in rooms other than the active one are room unloads, not despawns
+        if (actor->room >= 0 && actor->room != gPlayState->roomCtx.curRoom.num) {
+            return;
+        }
+
+        // Don't echo back despawns that were applied by a remote ACTOR_STATE packet
+        if ((gPlayState->gameplayFrames - sync->remoteUpdateFrame) < 30) {
+            return;
+        }
+
+        Anchor::Instance->SendPacket_ActorDespawn(actor, sync->spawnPos);
     });
 
     // #endregion

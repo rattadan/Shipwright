@@ -70,6 +70,24 @@ typedef struct {
     u8 syncItemsAndFlags; // 0 = off, 1 = on
 } RoomState;
 
+// Attached to synced actors via ObjectExtension. Actors like push blocks keep their
+// state outside of flags, and mutate home.pos as they move, so the position at init
+// time is stored separately and used as the actor's stable identity across clients.
+typedef struct {
+    Vec3f spawnPos;
+    Vec3f lastBroadcastPos;
+    Vec3s lastBroadcastRot;
+    u32 remoteUpdateFrame; // gameplayFrames when a remote ACTOR_STATE was last applied
+} AnchorActorSyncData;
+
+// Per-actor-id config for which actor lifecycle events get replicated via ACTOR_STATE packets.
+// Despawn is always broadcast for any actor that has AnchorActorSyncData registered.
+typedef struct {
+    s16 actorId;
+    bool broadcastPos;   // Broadcast pos/rot changes (e.g. push blocks being moved)
+    bool broadcastSpawn; // Broadcast initial state when spawned at runtime (e.g. item drops)
+} AnchorSyncedActorConfig;
+
 class Anchor : public Network {
   private:
     uint32_t spawningDummyPlayerForClientId = 0;
@@ -77,6 +95,7 @@ class Anchor : public Network {
     bool justLoadedSave = false;
     bool isHandlingUpdateTeamState = false;
     bool isProcessingIncomingPacket = false;
+    bool isSpawningRemoteActor = false;
     std::queue<nlohmann::json> incomingPacketQueue;
     std::mutex incomingPacketQueueMutex;
     std::queue<nlohmann::json> outgoingPacketQueue;
@@ -89,6 +108,7 @@ class Anchor : public Network {
     void SetDummyPlayerClientId(const Actor* actor, uint32_t clientId);
 
     void HandlePacket_AllClientState(nlohmann::json payload);
+    void HandlePacket_ActorState(nlohmann::json payload);
     void HandlePacket_ConsumeAdultTradeItem(nlohmann::json payload);
     void HandlePacket_DamagePlayer(nlohmann::json payload);
     void HandlePacket_DisableAnchor(nlohmann::json payload);
@@ -116,6 +136,7 @@ class Anchor : public Network {
     inline static const std::string clientVersion = (char*)gGitCommitHash;
 
     // Packet types //
+    inline static const std::string ACTOR_STATE = "ACTOR_STATE";
     inline static const std::string ALL_CLIENT_STATE = "ALL_CLIENT_STATE";
     inline static const std::string DAMAGE_PLAYER = "DAMAGE_PLAYER";
     inline static const std::string DISABLE_ANCHOR = "DISABLE_ANCHOR";
@@ -140,6 +161,7 @@ class Anchor : public Network {
     inline static const std::string UPDATE_TEAM_STATE = "UPDATE_TEAM_STATE";
 
     static Anchor* Instance;
+    static const AnchorSyncedActorConfig* GetSyncedActorConfig(s16 actorId);
     std::map<uint32_t, AnchorClient> clients;
     RoomState roomState;
 
@@ -156,6 +178,8 @@ class Anchor : public Network {
     bool CanTeleportTo(uint32_t clientId);
     uint32_t GetDummyPlayerClientId(const Actor* actor);
 
+    void SendPacket_ActorState(Actor* actor, Vec3f spawnPos);
+    void SendPacket_ActorDespawn(Actor* actor, Vec3f spawnPos);
     void SendPacket_ClearTeamState(std::string teamId);
     void SendPacket_DamagePlayer(u32 clientId, u8 damageEffect, u8 damage);
     void SendPacket_EntranceDiscovered(u16 entranceIndex);
