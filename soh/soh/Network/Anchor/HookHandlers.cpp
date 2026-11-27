@@ -462,7 +462,7 @@ void Anchor::RegisterHooks() {
         // goes stale (broadcaster left or its sim is paused) the local sim takes over,
         // which also makes handoff seamless when this client becomes the broadcaster
         if (isEnemy && !Anchor::Instance->IsActorSyncBroadcaster(actor->room)) {
-            if ((gPlayState->gameplayFrames - sync->remoteUpdateFrame) < 90) {
+            if ((gPlayState->gameplayFrames - sync->remoteUpdateFrame) < 90u) {
                 actor->world.pos = sync->lastBroadcastPos;
                 actor->world.rot = sync->lastBroadcastRot;
                 actor->shape.rot = sync->lastBroadcastRot;
@@ -471,7 +471,7 @@ void Anchor::RegisterHooks() {
         }
 
         // Don't echo back positions that were applied by a remote ACTOR_STATE packet
-        bool remoteOwned = (gPlayState->gameplayFrames - sync->remoteUpdateFrame) < 30;
+        bool remoteOwned = (gPlayState->gameplayFrames - sync->remoteUpdateFrame) < 30u;
 
         if (Math_Vec3f_DistXYZ(&actor->world.pos, &sync->lastBroadcastPos) > 0.01f ||
             actor->world.rot.x != sync->lastBroadcastRot.x || actor->world.rot.y != sync->lastBroadcastRot.y ||
@@ -481,7 +481,7 @@ void Anchor::RegisterHooks() {
             }
             sync->lastBroadcastPos = actor->world.pos;
             sync->lastBroadcastRot = actor->world.rot;
-        } else if (!remoteOwned && gPlayState->gameplayFrames % (isEnemy ? 30 : 60) == 0 &&
+        } else if (!remoteOwned && gPlayState->gameplayFrames % (isEnemy ? 30u : 60u) == 0u &&
                    (isEnemy || Math_Vec3f_DistXYZ(&actor->world.pos, &sync->spawnPos) > 0.01f)) {
             // Periodic re-broadcast: keeps receivers' enemies pinned even while idle, and
             // lets clients that reload the room converge back

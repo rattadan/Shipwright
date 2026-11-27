@@ -1,4 +1,5 @@
 #include <nlohmann/json.hpp>
+#include <cstdint>
 
 #include "Anchor.h"
 #include "soh/Enhancements/nametag.h"
@@ -224,7 +225,7 @@ uint32_t Anchor::GetActorSyncBroadcasterClientId(s8 roomNum) {
         }
     }
 
-    return best == UINT32_MAX ? 0 : best;
+    return best == UINT32_MAX ? 0u : best;
 }
 
 bool Anchor::IsActorSyncBroadcaster(s8 roomNum) {

@@ -34,7 +34,7 @@ static const AnchorSyncedActorConfig sSyncedActors[] = {
 };
 
 const AnchorSyncedActorConfig* Anchor::GetSyncedActorConfig(s16 actorId) {
-    for (size_t i = 0; i < ARRAY_COUNT(sSyncedActors); i++) {
+    for (u32 i = 0; i < ARRAY_COUNTU(sSyncedActors); i++) {
         if (sSyncedActors[i].actorId == actorId) {
             return &sSyncedActors[i];
         }
